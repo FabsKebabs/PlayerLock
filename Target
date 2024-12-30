@@ -1,0 +1,122 @@
+-- Variables
+local player = game.Players.LocalPlayer
+local targetPlayer = nil
+local isLocked = false
+local userInputService = game:GetService("UserInputService")
+local camera = game:GetService("Workspace").CurrentCamera
+local playerCharacter = player.Character or player.CharacterAdded:Wait()
+
+-- Camera height offset to keep the camera from going under the ground
+local cameraHeightOffset = 5  -- Adjust this value to set the desired height of the camera
+
+-- Create GUI for Player List
+local screenGui = Instance.new("ScreenGui")
+screenGui.Parent = player:WaitForChild("PlayerGui")
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 200, 0, 400)
+frame.Position = UDim2.new(0, 10, 0, 10)
+frame.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+frame.Parent = screenGui
+
+local uiListLayout = Instance.new("UIListLayout")
+uiListLayout.Parent = frame
+
+-- Function to create a button for each player
+local function createPlayerButton(playerName)
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(1, 0, 0, 50)
+    button.Text = playerName
+    button.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+    button.Parent = frame
+    
+    button.MouseButton1Click:Connect(function()
+        if targetPlayer and targetPlayer.Name == playerName then
+            -- Toggle target lock
+            isLocked = not isLocked
+            if not isLocked then
+                targetPlayer = nil
+            end
+        else
+            -- Set target player
+            targetPlayer = game.Players:FindFirstChild(playerName)
+            isLocked = true
+        end
+    end)
+end
+
+-- Function to update the player list
+local function updatePlayerList()
+    for _, existingButton in pairs(frame:GetChildren()) do
+        if existingButton:IsA("TextButton") then
+            existingButton:Destroy()
+        end
+    end
+
+    for _, otherPlayer in pairs(game.Players:GetPlayers()) do
+        if otherPlayer.Name ~= player.Name then
+            createPlayerButton(otherPlayer.Name)
+        end
+    end
+end
+
+-- Update player list on joining and when a new player enters/left the game
+game.Players.PlayerAdded:Connect(updatePlayerList)
+game.Players.PlayerRemoving:Connect(updatePlayerList)
+
+-- Track target's movements without changing camera position
+local function trackTargetMovement()
+    if isLocked and targetPlayer then
+        local targetCharacter = targetPlayer.Character
+        if targetCharacter and targetCharacter:FindFirstChild("HumanoidRootPart") then
+            local targetPosition = targetCharacter.HumanoidRootPart.Position
+
+            -- Keep the camera locked to a fixed height above the ground (cameraHeightOffset)
+            local cameraPosition = camera.CFrame.Position
+            local newCameraPosition = Vector3.new(cameraPosition.X, targetPosition.Y + cameraHeightOffset, cameraPosition.Z)
+
+            -- Camera does not move, just updates the direction it's facing
+            local directionToTarget = targetPosition - newCameraPosition
+            local lookAtPosition = targetPosition + Vector3.new(0, 5, 0)  -- Adjust this to give a slight vertical offset if needed
+
+            -- Update the camera's CFrame to face the target's direction and lock the camera position
+            camera.CFrame = CFrame.new(newCameraPosition, lookAtPosition)
+        end
+    end
+end
+
+-- Function to stop the lock when the target player's health reaches 0
+local function onPlayerHealthChange()
+    if targetPlayer and targetPlayer.Character then
+        local humanoid = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if humanoid and humanoid.Health <= 0 then
+            -- If target player's health is 0, stop the lock
+            isLocked = false
+            targetPlayer = nil
+        end
+    end
+end
+
+-- Connect the health change event to check if the health reaches 0
+game:GetService("RunService").Heartbeat:Connect(function()
+    if targetPlayer then
+        onPlayerHealthChange()
+    end
+end)
+
+-- Detect when the "C" key is pressed to stop the lock
+userInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    
+    if input.KeyCode == Enum.KeyCode.C then
+        -- Stop the lock when "C" is pressed
+        isLocked = false
+        targetPlayer = nil
+    end
+end)
+
+-- Run the tracking function every frame to update camera view
+game:GetService("RunService").RenderStepped:Connect(trackTargetMovement)
+
+-- Initial player list update
+updatePlayerList()
