@@ -9,27 +9,73 @@ local playerCharacter = player.Character or player.CharacterAdded:Wait()
 -- Camera height offset to keep the camera from going under the ground
 local cameraHeightOffset = 5  -- Adjust this value to set the desired height of the camera
 
+-- Height boundary (players above this height won't be tracked)
+local heightLimit = 120  -- If player's Y position is >= 120, stop lock and camera follow
+
 -- Create GUI for Player List
 local screenGui = Instance.new("ScreenGui")
 screenGui.Parent = player:WaitForChild("PlayerGui")
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 200, 0, 400)
-frame.Position = UDim2.new(0, 10, 0, 10)
-frame.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+frame.Size = UDim2.new(0, 250, 0, 450)  -- Set height to 450 for the main box
+frame.Position = UDim2.new(1, -260, 0, 10)  -- Position to the right side of the screen
+frame.BackgroundTransparency = 1  -- Set to 1 for fully invisible background
+frame.BorderSizePixel = 0
 frame.Parent = screenGui
 
 local uiListLayout = Instance.new("UIListLayout")
 uiListLayout.Parent = frame
+uiListLayout.Padding = UDim.new(0, 10)  -- Padding between buttons
+uiListLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+uiListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+uiListLayout.SortOrder = Enum.SortOrder.LayoutOrder  -- Ensure buttons are arranged top to bottom
+
+-- Create ScrollFrame for player names
+local scrollFrame = Instance.new("ScrollingFrame")
+scrollFrame.Size = UDim2.new(1, 0, 1, -40)  -- Make the scrollable area fill most of the frame
+scrollFrame.Position = UDim2.new(0, 0, 0, 40)  -- Position below the title
+scrollFrame.BackgroundTransparency = 1  -- Set to 1 for invisible background
+scrollFrame.ScrollBarThickness = 6  -- Add scrollbar for scrolling
+scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)  -- Initial canvas size
+scrollFrame.Parent = frame
+
+-- Add a layout inside the scroll frame
+local scrollLayout = Instance.new("UIListLayout")
+scrollLayout.Parent = scrollFrame
+scrollLayout.Padding = UDim.new(0, 10)
+scrollLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+
+-- Create title for the player list
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, 0, 0, 40)
+titleLabel.Position = UDim2.new(0, 0, 0, 0)
+titleLabel.BackgroundTransparency = 1  -- Set to 1 for invisible background
+titleLabel.Text = "Player List"
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleLabel.TextSize = 20
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.TextStrokeTransparency = 0.8
+titleLabel.Parent = frame
 
 -- Function to create a button for each player
-local function createPlayerButton(playerName)
+local function createPlayerButton(playerName, isFriend)
     local button = Instance.new("TextButton")
-    button.Size = UDim2.new(1, 0, 0, 50)
+    button.Size = UDim2.new(1, -20, 0, 50)
     button.Text = playerName
-    button.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-    button.Parent = frame
-    
+    button.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    button.TextColor3 = Color3.fromRGB(255, 255, 255)
+    button.TextSize = 16
+    button.TextTransparency = 0.5  -- Set transparency for player names
+    button.TextStrokeTransparency = 0.8
+    button.BorderSizePixel = 0
+    button.Parent = scrollFrame
+
+    -- If the player is a friend, set the text color to yellow
+    if isFriend then
+        button.TextColor3 = Color3.fromRGB(255, 255, 0)  -- Yellow color for friends
+    end
+
+    -- Toggle lock and simulate shift press when button is clicked
     button.MouseButton1Click:Connect(function()
         if targetPlayer and targetPlayer.Name == playerName then
             -- Toggle target lock
@@ -42,67 +88,98 @@ local function createPlayerButton(playerName)
             targetPlayer = game.Players:FindFirstChild(playerName)
             isLocked = true
         end
+
+        -- Simulate pressing the Shift key (or controller input, e.g., "A" button press)
+        local controllerInput = Instance.new("InputObject")
+        controllerInput.KeyCode = Enum.KeyCode.ButtonA  -- Simulate the "A" button press on controller
+        userInputService.InputBegan:Fire(controllerInput, false)  -- Trigger the InputBegan event
+    end)
+
+    -- Hover effect
+    button.MouseEnter:Connect(function()
+        button.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+    end)
+    button.MouseLeave:Connect(function()
+        button.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
     end)
 end
 
 -- Function to update the player list
 local function updatePlayerList()
-    for _, existingButton in pairs(frame:GetChildren()) do
+    -- Clear existing buttons
+    for _, existingButton in pairs(scrollFrame:GetChildren()) do
         if existingButton:IsA("TextButton") then
             existingButton:Destroy()
         end
     end
 
+    -- Add buttons for all players except the local player
     for _, otherPlayer in pairs(game.Players:GetPlayers()) do
         if otherPlayer.Name ~= player.Name then
-            createPlayerButton(otherPlayer.Name)
+            createPlayerButton(otherPlayer.Name, otherPlayer:IsFriendsWith(player.UserId))  -- Check if player is a friend
         end
     end
+
+    -- Update the CanvasSize of the ScrollFrame to fit the buttons
+    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, scrollLayout.AbsoluteContentSize.Y)
 end
 
 -- Update player list on joining and when a new player enters/left the game
 game.Players.PlayerAdded:Connect(updatePlayerList)
 game.Players.PlayerRemoving:Connect(updatePlayerList)
 
--- Track target's movements without changing camera position
+-- Track target's movements and make the camera and humanoid face the selected player
 local function trackTargetMovement()
     if isLocked and targetPlayer then
         local targetCharacter = targetPlayer.Character
         if targetCharacter and targetCharacter:FindFirstChild("HumanoidRootPart") then
             local targetPosition = targetCharacter.HumanoidRootPart.Position
 
+            -- Stop tracking if the target's Y-position is >= heightLimit (120 or above)
+            if targetPosition.Y >= heightLimit then
+                -- If the target is too high, stop tracking
+                isLocked = false
+                targetPlayer = nil
+                return
+            end
+
             -- Keep the camera locked to a fixed height above the ground (cameraHeightOffset)
             local cameraPosition = camera.CFrame.Position
             local newCameraPosition = Vector3.new(cameraPosition.X, targetPosition.Y + cameraHeightOffset, cameraPosition.Z)
 
-            -- Camera does not move, just updates the direction it's facing
+            -- Camera should face the target player's direction
             local directionToTarget = targetPosition - newCameraPosition
-            local lookAtPosition = targetPosition + Vector3.new(0, 5, 0)  -- Adjust this to give a slight vertical offset if needed
+            local lookAtPosition = targetPosition + Vector3.new(0, 5, 0)  -- Slight vertical offset for camera angle
 
-            -- Update the camera's CFrame to face the target's direction and lock the camera position
+            -- Update the camera's CFrame to lock the position and make it look at the target
             camera.CFrame = CFrame.new(newCameraPosition, lookAtPosition)
+
+            -- Make the player's humanoid face the target player
+            if playerCharacter and playerCharacter:FindFirstChild("HumanoidRootPart") then
+                playerCharacter:SetPrimaryPartCFrame(CFrame.new(playerCharacter.HumanoidRootPart.Position, targetCharacter.HumanoidRootPart.Position))
+            end
         end
     end
 end
 
 -- Function to stop the lock when the target player's health reaches 0
-local function onPlayerHealthChange()
-    if targetPlayer and targetPlayer.Character then
-        local humanoid = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
-        if humanoid and humanoid.Health <= 0 then
-            -- If target player's health is 0, stop the lock
-            isLocked = false
-            targetPlayer = nil
-        end
+local function onPlayerHealthChanged(health)
+    if health <= 0 then
+        -- If target player's health is 0, stop the lock
+        isLocked = false
+        targetPlayer = nil
     end
 end
 
--- Connect the health change event to check if the health reaches 0
-game:GetService("RunService").Heartbeat:Connect(function()
-    if targetPlayer then
-        onPlayerHealthChange()
+-- Monitor health changes for the target player
+local function monitorTargetHealth()
+    if targetPlayer and targetPlayer.Character then
+        local humanoid = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.HealthChanged:Connect(onPlayerHealthChanged)
+        end
     end
-end)
+end
 
 -- Detect when the "C" key is pressed to stop the lock
 userInputService.InputBegan:Connect(function(input, gameProcessed)
@@ -120,3 +197,28 @@ game:GetService("RunService").RenderStepped:Connect(trackTargetMovement)
 
 -- Initial player list update
 updatePlayerList()
+
+-- Monitor health change of the selected target player
+game:GetService("RunService").Heartbeat:Connect(function()
+    if targetPlayer then
+        monitorTargetHealth()
+    end
+end)
+
+-- Create a button to hide the player list GUI
+local hideButton = Instance.new("TextButton")
+hideButton.Size = UDim2.new(0, 250, 0, 50)
+hideButton.Position = UDim2.new(1, -260, 0, 470)  -- Position the hide button below the list (moved further down)
+hideButton.Text = "Hide Player List"
+hideButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+hideButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+hideButton.TextSize = 16
+hideButton.TextTransparency = 0.5
+hideButton.TextStrokeTransparency = 0.8
+hideButton.BorderSizePixel = 0
+hideButton.Parent = screenGui
+
+hideButton.MouseButton1Click:Connect(function()
+    -- Hide the player list frame
+    frame.Visible = not frame.Visible
+end)
